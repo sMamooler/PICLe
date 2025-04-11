@@ -18,8 +18,13 @@ Instructions coming soon.
 ### PICLe: In-context NED with pseudo-annotated demonstrations
 ### Input-output correspondence of in-context demonstrations
 ### Partially Correct ICL demonstrations
-
 ```bash scripts/analysis_partially_correct_demos.sh```
+
+### zero-shot NED
+```python incontext_ned.py --config-name=zero_shot_ned data=<dataset_name>```
+
+### few-shot NED
+```python incontext_ned.py --config-name=ten_shot_ned data=<dataset_name>```
 
 
 # Acknowledgements (WIP)
