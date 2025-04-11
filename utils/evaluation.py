@@ -29,8 +29,7 @@ def _tokenize_with_special_characters(text):
 
 
 def _find_subsequence_index(main_sequence, subsequence, start_index=0):
-    """Finds the index of the first appearance of an ordered set of items (subsequence) in a referenced ordered set of items (main_sequence).
-    Returns -1 if the subsequence is not found."""
+    """Finds the index of the first appearance of an ordered set of items (subsequence) in a referenced ordered set of items (main_sequence). Returns -1 if the subsequence is not found."""
     len_main = len(main_sequence)
     len_sub = len(subsequence)
 

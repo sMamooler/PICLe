@@ -2,12 +2,34 @@
 
 import logging
 import random
+import string
 from typing import Any, Optional
 
 import CONSTANTS as CONSTANTS
+import nltk
 import numpy as np
 
+nltk.download("words")
+nltk.download("stopwords")
+import ssl
+
+from nltk.corpus import stopwords, words
+
+### for nltk downloads
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+nltk.download("averaged_perceptron_tagger")
+nltk.download("wordnet")
+nltk.download("punkt")
+
 log = logging.getLogger(__name__)
+
+
+### utility functions for analysis with partially correct demonstrations
 
 
 def _deletion_substitution(
@@ -147,3 +169,144 @@ def perturb_annotations(
         num_entities,
         num_entities_diff,
     )
+
+
+### utility functions for analysis with corrupted demonstrations
+
+
+def _random_id_labels(
+    data: list,
+):
+    """Replace the ground-truth labels in a sample with random words from the in-domain label space."""
+    id_lable_space = []
+    for sample in data:
+        id_lable_space.extend(sample["entities"])
+    id_lable_space = set(id_lable_space)
+
+    for sample in data:
+        correct_labels = sample["entities"]
+        wrong_id_labels = random.sample(
+            id_lable_space.difference(set(correct_labels)), len(correct_labels)
+        )
+        sample["entities"] = wrong_id_labels
+
+    return data
+
+
+def _random_ood_labels(
+    data: list,
+):
+    """Replace the ground-truth labels in a sample with random words from the out-of-domain label space."""
+    id_lable_space = []
+    for sample in data:
+        id_lable_space.extend(sample["entities"])
+    id_lable_space = set(id_lable_space)
+
+    ood_label_space = set(words.words()).difference(set(id_lable_space))
+    for sample in data:
+        correct_labels = sample["entities"]
+        wrong_ood_labels = random.sample(ood_label_space, len(correct_labels))
+        sample["entities"] = wrong_ood_labels
+
+    return data
+
+
+def _random_ood_labels_from_text(data: list):
+    """Replace the ground-truth labels in a sample with random words from the text of that samples."""
+    stop_words = set(stopwords.words("english"))
+    for sample in data:
+        correct_labels = sample["entities"]
+        text = sample["text"]
+        text_words = [
+            w
+            for w in text.split()
+            if w.lower() not in stop_words
+            and w not in correct_labels
+            and w not in string.punctuation
+        ]
+        if len(text_words) < len(correct_labels):
+            print(text, correct_labels)
+            wrong_ood_labels_from_text = []
+        else:
+            wrong_ood_labels_from_text = random.sample(text_words, len(correct_labels))
+            for l_id, wrong_label in enumerate(wrong_ood_labels_from_text):
+                for p in string.punctuation:
+                    wrong_ood_labels_from_text[l_id] = wrong_label.replace(p, "")
+
+        sample["entities"] = wrong_ood_labels_from_text
+    return data
+
+
+def _swapped_id_labels(
+    data: list,
+):
+    """Swap the id labels in a sample with other samples in the dataset."""
+    for sample in data:
+        other_samples = data.copy()
+        other_samples.remove(sample)
+        swapped_id_labels = random.sample(other_samples, 1)[0]["entities"]
+        sample["entities"] = swapped_id_labels
+
+    return data
+
+
+def corrupt_labels(
+    data: list,
+    wrong_annotation_type: str,
+):
+    """Replaces the ground-truth labels with wrong labels.
+    Args:
+        data (list): The data to replace the annotations in.
+        wrong_annotation_type (str): The type of wrong annotation to use. One of ["random_id_labels", "random_ood_labels", "random_ood_labels_from_text", "swapped_id_labels"].
+    Returns:
+        list: The data with the added wrong annotations.
+    Raises:
+        ValueError: If the wrong annotation type is not supported.
+    """
+    if wrong_annotation_type == "random_id_labels":
+        data = _random_id_labels(data)
+    elif wrong_annotation_type == "random_ood_labels":
+        data = _random_ood_labels(data)
+    elif wrong_annotation_type == "random_ood_labels_from_text":
+        data = _random_ood_labels_from_text(data)
+    elif wrong_annotation_type == "swapped_id_labels":
+        data = _swapped_id_labels(data)
+    else:
+        raise ValueError(f"wrong_annotation_type {wrong_annotation_type} not supported")
+    return data
+
+
+def corrupt_texts(data: list, corrupt_label: bool, shuffle: bool):
+    """Replace text (and labels if corrupt_label is True) in a sample with corrupted text (and labels).
+    Args:
+        data (list): The data to replace the text in.
+        corrupt_label (bool): Whether to corrupt the labels or not.
+        shuffle (bool): Whether to shuffle the text words or not.
+    Returns:
+        list: The data with the added wrong text (and labels if corrupt_label is True).
+    """
+    id_lable_space = []
+    for sample in data:
+        id_lable_space.extend(sample["entities"])
+    id_lable_space = set(id_lable_space)
+
+    ood_label_space = set(words.words()).difference(set(id_lable_space))
+    for sample in data:
+        text = sample["text"]
+        random_ood_words = random.sample(ood_label_space, len(set(sample["entities"])))
+        entity2random_ood_words = dict(zip(set(sample["entities"]), random_ood_words))
+        ood_labels = [None for _ in range(len(sample["entities"]))]
+        for i, entity in enumerate(sample["entities"]):
+            ood_word = entity2random_ood_words[entity]
+            text = text.replace(entity, ood_word)
+            if shuffle:
+                text_words = text.split()
+                random.shuffle(text_words)
+                text = " ".join(text_words)
+            ood_labels[i] = ood_word
+
+        sample["text"] = text
+        if corrupt_label:
+            sample["entities"] = ood_labels
+
+    return data

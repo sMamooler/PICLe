@@ -3,7 +3,6 @@
 - [ ] write script for demonstration retrieval
 - [ ] write script for self verification
 - [ ] write notebook for generating random perturbations plots
-- [ ] write notebook for generating partially correct perturbations plots
 - [ ] write notebook for generating PICLe vs baselines plots
 - [ ] Add links to paper, and video
 
@@ -26,8 +25,18 @@ Instructions coming soon.
 
 ### PICLe: In-context NED with pseudo-annotated demonstrations
 ### Input-output correspondence of in-context demonstrations
+To run the experiments with random corrupted demonstrations for all datasets run the command below:
+
+```bash scripts/analysis_random_corrupted_demos.sh```
+
+To aggregate the results of these experiments and plot them use the [analysis_random_corrupted_demos](analysis_random_corrupted_demos.ipynb) notebook.
+
 ### Partially Correct ICL demonstrations
+To run the experiments with partially correct demonstrations for all datasets run the command below:
+
 ```bash scripts/analysis_partially_correct_demos.sh```
+
+To aggregate the results of these experiments and plot them use the [analysis_partially_correct_demos](analysis_partially_correct_demos.ipynb) notebook.
 
 ### zero-shot NED
 ```python incontext_ned.py --config-name=zero_shot_ned data=<dataset_name>```

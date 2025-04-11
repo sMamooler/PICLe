@@ -3,7 +3,6 @@
 # TODO(smamooler): Add merge_annotations.py and clean it up.
 # TODO(smamooler): Add random perturbation data prepatation and clean it up.
 # TODO(smamooler): Add notebook for plotting random label experiment and clean it up.
-# TODO(smamooler): Add notebook for plotting perturbation experiment and clean it up.
 # TODO(smamooler): Add notebook for plotting PICLe experiment and clean it up.
 # TODO(smamooler): Add notebook for plotting retrieval comparison experiment and clean it up.
 
@@ -39,7 +38,7 @@ from utils.evaluation import (
     post_process_extractions,
 )
 from utils.llm import call_gpt, call_hf
-from utils.perturbation import perturb_annotations
+from utils.perturbation import corrupt_labels, corrupt_texts, perturb_annotations
 from utils.prompters import get_prompt
 from vllm import LLM
 
@@ -98,6 +97,33 @@ def run_incontext_ned(
             encoding="utf-8",
         )
     )
+
+    corruption_type = cfg.get("corruption_type", None)
+    # overwrite the demo_data_filename if a corruption type is specified
+    if corruption_type:
+        corruption_type = corruption_type.get("name")
+        cfg.data.demo_data_filename = cfg.data.demo_data_filename.replace(
+            ".json", f"_{corruption_type}.json"
+        )
+        demo_data_path = "/".join(
+            [cfg.data.data_dir, cfg.data.dataset, cfg.data.demo_data_filename]
+        )
+        if not os.path.exists(demo_data_path):
+            log.info(f"Corrupting the demo data: {demo_data_path}")
+            if "text" in corruption_type:
+                corrupt_label = "labels" in corruption_type
+                shuffle = "shuffle" in corruption_type
+                corrupted_data = corrupt_texts(demo_dataset, corrupt_label, shuffle)
+            else:
+                corrupted_data = corrupt_labels(demo_dataset, corruption_type)
+
+            with open(demo_data_path, "w", encoding="utf-8") as f:
+                json.dump(corrupted_data, f, indent=4)
+        else:
+            log.info(f"Corrupted data file already exists: {demo_data_path}")
+            corrupted_data = json.load(open(demo_data_path, encoding="utf-8"))
+
+        demo_dataset = corrupted_data
 
     # TODO(@smamooler): can this be safely removed?
     # if random_addition_factor:
@@ -223,8 +249,12 @@ def run_incontext_ned(
             sample_demo_num_entities = []
             sample_demo_num_entities_diff = []
 
-            peturbation_type = cfg.get("perturbation_type", None).get("name")
-            perturbation_factor = cfg.get("perturbation_factor", None).get("value")
+            peturbation_type = cfg.get("perturbation_type", None)
+            if peturbation_type:
+                peturbation_type = peturbation_type.get("name")
+            perturbation_factor = cfg.get("perturbation_factor", None)
+            if perturbation_factor:
+                perturbation_factor = perturbation_factor.get("value")
 
             demos = get_demos(
                 cfg.demonstration_retrieval.method,

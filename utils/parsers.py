@@ -5,8 +5,8 @@ import regex as re
 log = logging.getLogger(__name__)
 
 
-# TODO(@smamooler): Is this function needed?
 def _parse_bio_ner_output(llm_output: str) -> list[str]:
+    # TODO(@smamooler): Is this function needed?
 
     # Split the text by '||' to separate each word and label pair
     word_label_pairs = llm_output.split("||")
