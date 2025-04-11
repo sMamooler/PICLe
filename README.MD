@@ -8,8 +8,17 @@
 - [ ] Add links to paper, and video
 
 ## Setup (WIP)
-Instructions coming soon.
-
+### Environment
+```
+conda create -n picle python=3.9 
+conda activate picle
+pip install -r requirements.txt
+```
+### HuggingFace and OpenAI API keys
+```
+export HF_API_KEY=<YOUR_HF_API_KEY>
+export OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
+```
 ## Data preparation (WIP)
 Instructions coming soon.
 
