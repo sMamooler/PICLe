@@ -1,22 +1,27 @@
+"""This module contains utility functions to use llms."""
+
+import gc
 import logging
 import os
 import sys
 import time
+from typing import Any, Optional
 
 import nltk
 import openai
 import tiktoken
+import torch
+from omegaconf import DictConfig
 from transformers import AutoTokenizer
 from vllm import SamplingParams
+from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 
 nltk.download("punkt")
-from utils.parsers import parse_llm_output
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 sys.stdout.reconfigure(encoding="utf-8")
 
 log = logging.getLogger(__name__)
-# TODO(@smamooler): clean this script up and add docstrings
 
 COSTS = {
     "gpt-3.5-turbo": {"input": 0.0000015, "output": 0.000002},
@@ -48,29 +53,37 @@ def _compute_cost(input_: str, output: str, model: str):
     return input_len * COSTS[model]["input"] + output_len * COSTS[model]["output"]
 
 
+def unload_llm(model: Optional[Any]):
+    """Delete the LLM model and free the memory."""
+    if model:
+        destroy_model_parallel()
+        del model.llm_engine.driver_worker
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.distributed.destroy_process_group()
+
+
 def call_gpt(
     model: str,
     batch_messages: list,
-    prompt_strategy: str,
     temperature: float = 0.0,
     top_p: float = 1.0,
     max_tokens: int = 1024,
-) -> tuple[list[str], list[str], float]:
+) -> tuple[list[str], float]:
     """Call the OpenAI API to generate responses for a batch of messages.
 
     Args:
         model (str): The GPT model to use.
         batch_messages (list): The list of messages to generate responses for.
-        prompt_strategy (str): The prompt strategy used to generate the output.
         temperature (float, optional): Decoding temperature. Defaults to 0.0.
         top_p (float, optional): Decoding top-p. Defaults to 1.0.
         max_tokens (int, optional): Maximum number of tokens to generarte. Defaults to 1024.
 
     Returns:
-        tuple[list[str], list[str], float]: The list of generated responses, the list of predicted entities, and the cost.
+        tuple[list[str], float]: The list of generated responses, and the cost.
     """
     batch_gpt_output = []
-    batch_pred_entities = []
     costs = 0
 
     for messages in batch_messages:
@@ -92,9 +105,7 @@ def call_gpt(
                 cost = _compute_cost(
                     "".join([m["content"] for m in messages]), output, model
                 )
-                parsed_output = parse_llm_output(output, prompt_strategy)
                 stop = True
-                batch_pred_entities.append(parsed_output)
                 batch_gpt_output.append(output)
                 costs += cost
 
@@ -104,57 +115,32 @@ def call_gpt(
             except openai.error.Timeout as e:
                 log.info("Timeout error, waiting 10 seconds")
                 time.sleep(10)
-            except IndexError as e:
-                if nb_trial > 5:
-                    log.info(
-                        f"Index error {e}.\nModel Output:\n",
-                        output,
-                        "Too many trials! Moving on...",
-                    )
-                    stop = True
-                    parsed_output = []
-                else:
-                    log.info(f"Index error {e}. Trying again.\nModel Output:\n", output)
-            except ValueError as e:
-                if nb_trial > 5:
-                    log.info(
-                        f"Value error {e}.\nModel Output:\n",
-                        output,
-                        "Too many trials! Moving on...",
-                    )
-                    stop = True
-                    parsed_output = []
-                else:
-                    temperature += 0.1
-                    log.info(f"Value error {e}.\nModel Output:\n", output)
 
-    return batch_gpt_output, batch_pred_entities, cost
+    return batch_gpt_output, cost
 
 
 def call_hf(
     langauge_model,
     tokenizer: AutoTokenizer,
     batch_messages: list,
-    prompt_strategy: str,
     temperature: float = 0.0,
     top_p: float = 1.0,
     max_tokens: int = 512,
     seed: int = 12345,
-) -> tuple[list[str], list[str], float]:
+) -> tuple[list[str], float]:
     """Call the Hugging Face API to generate responses for a batch of messages.
 
     Args:
         langauge_model: vLLM language model
         tokenizer (AutoTokenizer): LLM tokenizer
         batch_messages (list): The list of messages to generate responses for.
-        prompt_strategy (str): The prompt strategy used to generate the output.
         temperature (float, optional): Decoding temperature. Defaults to 0.0.
         top_p (float, optional): Decoding top-p. Defaults to 1.0.
         max_tokens (int, optional): Maximum number of tokens to generarte. Defaults to 512.
         seed (int, optional): Generation seed. Defaults to 12345.
 
     Returns:
-        tuple[list[str], list[str], float]: The list of generated responses, the list of predicted entities, and the cost
+        tuple[list[str], float]: The list of generated responses, and the cost
     """
 
     formatted_messages = list(
@@ -172,17 +158,54 @@ def call_hf(
     llm_outputs = langauge_model.generate(formatted_messages, sampling_params)
 
     outputs = []
-    parsed_outputs = []
 
     for i in range(len(llm_outputs)):
         output = llm_outputs[i].outputs[0].text
         outputs.append(output)
-        parsed = parse_llm_output(output, prompt_strategy)
-        parsed_outputs.append(parsed)
-
         log.debug(f"output:\n{output}")
-        log.debug(f"parsed output:\n{parsed}")
 
     cost = 0
 
-    return outputs, parsed_outputs, cost
+    return outputs, cost
+
+
+def call_llm(
+    langauge_model: Optional[Any],
+    tokenizer: Optional[Any],
+    batch_messages: list[dict[str, str]],
+    cfg: DictConfig,
+):
+    """Call the LLM to generate responses for a batch of messages.
+
+    Args:
+        langauge_model (Any): The language model to use if not GPT.
+        tokenizer (Any): The tokenizer to use if not GPT..
+        batch_messages (list): The list of messages to generate responses for.
+        cfg (DictConfig): The configuration object.
+
+    Returns:
+        tuple[list[str], float]: The list of generated responses, and the cost.
+    """
+
+    if "gpt" in cfg.model:
+        batch_output, cost = call_gpt(
+            cfg.model,
+            batch_messages,
+            cfg.demonstration_retrieval.num_shots,
+            verbose=cfg.verbose,
+            temperature=cfg.generation.temperature,
+            top_p=cfg.generation.top_p,
+            max_tokens=cfg.generation.max_tokens,
+        )
+    else:
+        batch_output, cost = call_hf(
+            langauge_model,
+            tokenizer,
+            batch_messages,
+            temperature=cfg.generation.temperature,
+            top_p=cfg.generation.top_p,
+            max_tokens=cfg.generation.max_tokens,
+            seed=cfg.seed,
+        )
+
+    return batch_output, cost
