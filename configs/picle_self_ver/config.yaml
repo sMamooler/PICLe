@@ -1,0 +1,18 @@
+defaults:
+  - data: bc5chem
+
+annotation_file_path: /mnt/u14157_ic_nlp_001_files_nfs/nlpdata1/home/mamooler/PICLe/outputs/2025-04-24/16-22-52/results.csv
+model: mistral
+model_revision_hash: 73068f3702d050a2fd5aa2ca1e612e5036429398
+batch_size: 16
+seed: 12345
+verbose: True
+
+generation:
+  temperature: 0.0
+  top_p: 1.0
+  max_tokens: 512
+
+evaluation:
+  method: IOB
+  resolve_overlapping_entities: False

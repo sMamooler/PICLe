@@ -1,3 +1,5 @@
+"""This module contains functions to build prompts."""
+
 import json
 import random
 from typing import Any
@@ -90,7 +92,7 @@ def _build_demo_chat(
     return demonstrations
 
 
-def get_prompt(
+def get_ned_prompt(
     input: str,
     demos: list[dict[str, Any]],
     entity_type: str,
@@ -119,11 +121,10 @@ def get_prompt(
         "chemical": "chemicals",
         "gene/protein": "genes and proteins",
         "disease/illness": "diseases",
+        "chemical/drug": "chemicals and drugs",
     }
     other_entity_types = [
-        et
-        for et in ["chemical", "gene/protein", "disease/illness"]
-        if et != entity_type
+        et for et in list(entity_type_formulation.keys()) if et != entity_type
     ]
     other_entity_types = ", and ".join(
         [entity_type_formulation[et] for et in other_entity_types]
@@ -135,7 +136,12 @@ def get_prompt(
 
     demonstrations = _build_demo_chat(demos, prompt_strategy, entity_type)
 
-    instructions += f"""Please extract all of the entities corresponding to {entity_type_formulation[entity_type]} from the following paragraph, same way as they are marked in the examples.
+    if nb_entity_examples == 0:
+        instructions += f"""Please extract all of the entities corresponding to {entity_type_formulation[entity_type]} from the following paragraph, following this output format: {entity_type} entities: [{entity_type.upper()} ENTITIES LIST].
+Make sure to include all the {entity_type_formulation[entity_type].upper()} mentioned in the text, but not the {other_entity_types}. You will be penalized if you include an entity more or less than the number of times it appears in the text. Please enclose the list of entities in square brackets and separate them with commas."""
+
+    else:
+        instructions += f"""Please extract all of the entities corresponding to {entity_type_formulation[entity_type]} from the following paragraph, same way as they are marked in the examples.
 Make sure to include all and only the {entity_type_formulation[entity_type]} mentioned in the text, but not the {other_entity_types}. If there are no {entity_type_formulation[entity_type]} entities in the text output 'None'. You will be penalized if you include an entity more or less than the number of times it appears in the text."""
 
     messages = [
@@ -144,11 +150,43 @@ Make sure to include all and only the {entity_type_formulation[entity_type]} men
     ]
     if demonstrations:
         demonstrations[0]["content"] = (
-            f"## Here are some examples:\n" + demonstrations[0]["content"]
+            "## Here are some examples:\n" + demonstrations[0]["content"]
         )
         messages += demonstrations
 
     messages += [
         {"role": "user", "content": f"input: {input}\n{entity_type} entities:"}
     ]
+    return messages
+
+
+def get_sv_prompt(entity: str, entity_type: str, context: str) -> list[dict[str, str]]:
+    """Constructs the prompt for self verification: does the entity have the correct type?
+
+    Args:
+        entity (str): the entity to verify
+        entity_type (str): the type of the entity
+        context (str): the context in which the entity appears
+
+    Returns:
+        list[dict[str, str]]: the prompt for self verification
+    """
+    instructions = f"""Given the context and definition of {entity_type} entity, answer the following question. Please reason about your answer and include YES or NO in your response. YES if the given phrase is a {entity_type} entity, and NO if it is not. If you are not sure, you can say I don't know.\n"""
+    entity_def = _get_entity_definition(entity_type, 0)
+    messages = [
+        {"role": "user", "content": instructions},
+        {"role": "assistant", "content": "Understood."},
+    ]
+    question = f"""Context: {context}
+{entity_type} definition: {entity_def}
+"""
+    entity_subtypes = entity_type.split("/")
+    if len(entity_subtypes) == 1:
+        question += f"Based on this context and definition, does {entity} correspond to the name of a {entity_type} entity?\n"
+    else:
+        question += "Based on this context and definition answer the following questions. Please be precise and accurate in your response."
+        for i, subtype in enumerate(entity_subtypes):
+            question += f"\n{i+1}. is '{entity}' a {subtype} entity? (YES or No?)"
+    messages.append({"role": "user", "content": question})
+
     return messages

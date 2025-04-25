@@ -1,3 +1,5 @@
+"""This module contains functions to evaluate the performance of entity extraction models."""
+
 import ssl
 from collections import defaultdict
 

@@ -1,3 +1,5 @@
+"""This module contains functions to parse llm's outputs."""
+
 import logging
 
 import regex as re
@@ -123,7 +125,7 @@ def parse_llm_output(llm_output, prompt_strategy) -> list[str]:
     """
 
     if prompt_strategy == "standard":
-        output = _parse_standard_output
+        output = _parse_standard_output(llm_output)
     elif prompt_strategy == "GPT-NER":
         output = _parse_gpt_ner_output(llm_output)
     elif prompt_strategy == "Prompt-NER":

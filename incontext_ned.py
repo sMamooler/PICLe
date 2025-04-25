@@ -1,8 +1,11 @@
-"""Performs named entity detection (NED) with in-context learning."""
+"""
+Runs in-context NED (Named Entity Detection) and evaluates the predictions.
 
-# TODO(smamooler): Add merge_annotations.py and clean it up.
+Usage:
+    python incontext_ned.py data=your_dataset_name
+"""
+
 # TODO(smamooler): Add random perturbation data prepatation and clean it up.
-# TODO(smamooler): Add notebook for plotting random label experiment and clean it up.
 # TODO(smamooler): Add notebook for plotting PICLe experiment and clean it up.
 # TODO(smamooler): Add notebook for plotting retrieval comparison experiment and clean it up.
 
@@ -34,12 +37,14 @@ from utils.demo_retrieval import (
 )
 from utils.evaluation import (
     entity_list_to_iob_format,
+    entity_list_to_iob_format_deprecated,
     ner_list_eval,
     post_process_extractions,
 )
-from utils.llm import call_gpt, call_hf
+from utils.llm import call_llm, unload_llm
+from utils.parsers import parse_llm_output
 from utils.perturbation import corrupt_labels, corrupt_texts, perturb_annotations
-from utils.prompters import get_prompt
+from utils.prompters import get_ned_prompt
 from vllm import LLM
 
 log = logging.getLogger(__name__)
@@ -78,6 +83,9 @@ def run_incontext_ned(
             revision=cfg.model_revision_hash,
             tokenizer_revision=cfg.model_revision_hash,
         )
+    else:
+        tokenizer = None
+        langauge_model = None
 
     # load the demonstration and inference data
     # TODO(@smamooler): if utf-8 does not work the code should handle latin-1 encoding
@@ -89,14 +97,17 @@ def run_incontext_ned(
             encoding="utf-8",
         )
     )
-    demo_dataset = json.load(
-        open(
-            "/".join(
-                [cfg.data.data_dir, cfg.data.dataset, cfg.data.demo_data_filename]
-            ),
-            encoding="utf-8",
+    if cfg.demonstration_retrieval.num_shots == 0:
+        demo_dataset = []
+    else:
+        demo_dataset = json.load(
+            open(
+                "/".join(
+                    [cfg.data.data_dir, cfg.data.dataset, cfg.data.demo_data_filename]
+                ),
+                encoding="utf-8",
+            )
         )
-    )
 
     corruption_type = cfg.get("corruption_type", None)
     # overwrite the demo_data_filename if a corruption type is specified
@@ -202,7 +213,10 @@ def run_incontext_ned(
     cosine_sim_matrix_dict = None
     kmeans_dict = None
 
-    if "kmeans" in cfg.demonstration_retrieval.method:
+    if (
+        cfg.demonstration_retrieval.method
+        and "kmeans" in cfg.demonstration_retrieval.method
+    ):
         cluster_file_name = f"{cfg.data.demo_data_filename[:-5]}_cluster.csv"
         if cfg.data.demo_data_size:
             cluster_file_name = cluster_file_name.replace(
@@ -223,7 +237,10 @@ def run_incontext_ned(
             f"{cfg.data.data_dir}/{cfg.data.dataset}/{cluster_file_name}", index=False
         )
 
-    if "knn" in cfg.demonstration_retrieval.method:
+    if (
+        cfg.demonstration_retrieval.method
+        and "knn" in cfg.demonstration_retrieval.method
+    ):
         cosine_sim_matrix_dict = compute_cosin_sim_matrix(
             demo_dict, demo_embeddings_dict, inference_embeddings
         )
@@ -256,17 +273,20 @@ def run_incontext_ned(
             if perturbation_factor:
                 perturbation_factor = perturbation_factor.get("value")
 
-            demos = get_demos(
-                cfg.demonstration_retrieval.method,
-                demo_dict,
-                cfg.demonstration_retrieval.num_shots,
-                index,
-                sample_index,
-                peturbation_type is not None,
-                cosine_sim_matrix_dict,
-                kmeans_dict,
-                cfg.get("demonstration_retrieval", {}).get("cluster_id", None),
-            )
+            if cfg.demonstration_retrieval.num_shots == 0:
+                demos = []
+            else:
+                demos = get_demos(
+                    cfg.demonstration_retrieval.method,
+                    demo_dict,
+                    cfg.demonstration_retrieval.num_shots,
+                    index,
+                    sample_index,
+                    peturbation_type is not None,
+                    cosine_sim_matrix_dict,
+                    kmeans_dict,
+                    cfg.get("demonstration_retrieval", {}).get("cluster_id", None),
+                )
 
             if peturbation_type:
 
@@ -303,7 +323,7 @@ def run_incontext_ned(
             batch_demos.append(demos)
             log.debug(f"demos: {demos}")
 
-            messages = get_prompt(
+            messages = get_ned_prompt(
                 sample["text"],
                 demos,
                 entity_type,
@@ -313,34 +333,24 @@ def run_incontext_ned(
             )
             batch_messages.append(messages)
 
-        if "gpt" in cfg.model:
-            batch_output, batch_pred_entities, batch_cost = call_gpt(
-                cfg.model,
-                batch_messages,
-                cfg.prompting.method,
-                cfg.demonstration_retrieval.num_shots,
-                verbose=cfg.verbose,
-                temperature=cfg.generation.temperature,
-                top_p=cfg.generation.top_p,
-                max_tokens=cfg.generation.max_tokens,
-            )
-        else:
-            batch_output, batch_pred_entities, batch_cost = call_hf(
-                langauge_model,
-                tokenizer,
-                batch_messages,
-                cfg.prompting.method,
-                temperature=cfg.generation.temperature,
-                top_p=cfg.generation.top_p,
-                max_tokens=cfg.generation.max_tokens,
-                seed=cfg.seed,
-            )
+        batch_output, batch_cost = call_llm(
+            langauge_model, tokenizer, batch_messages, cfg
+        )
+
+        batch_pred_entities = [
+            parse_llm_output(output, cfg.prompting.method) for output in batch_output
+        ]
 
         batch_output = list(map(lambda x: x.replace("\n", " ### "), batch_output))
         cost_sum += batch_cost
 
         batch_entry = pd.DataFrame(
             {
+                "id": (
+                    [sample["id"] for sample in batch_samples]
+                    if "chemprot" not in cfg.data.dataset
+                    else [sample["pmid"] for sample in batch_samples]
+                ),
                 "text": [sample["text"] for sample in batch_samples],
                 "prompt": batch_messages,
                 "demo_prc": (
@@ -376,16 +386,18 @@ def run_incontext_ned(
 
     log.info(f"Average cost for GPT: {cost_sum / len(inference_dataset)}")
 
+    unload_llm(langauge_model)
+
 
 def evaluate_ned(
-    results_dir: str,
+    results_csv_path: str,
     eval_method: str,
     resolve_overlapping_entities: bool,
 ):
     """Evaluate the NED predictions.
 
     Args:
-        results_dir (str): The directory containing the results.
+        results_csv_path (str): The path to the CSV file containing the results.
         eval_method (str): The evaluation method to use. Can be "IOB" or "list".
         resolve_overlapping_entities (bool): Whether to resolve overlapping entities.
 
@@ -393,7 +405,6 @@ def evaluate_ned(
         ValueError: If the evaluation method is not supported.
     """
     # load predictions and ground truth
-    results_csv_path = results_dir + "/results.csv"
     results_df = pd.read_csv(results_csv_path, encoding="utf-8", engine="python")
     results_df.fillna("[]", inplace=True)
 
@@ -425,7 +436,7 @@ def evaluate_ned(
     results_df.to_csv(results_csv_path, index=False)
 
     if eval_method == "IOB":
-        eval_path = results_dir + "/ner_iob_evaluation.json"
+        eval_path = results_csv_path.replace(".csv", "_ner_iob_evaluation.json")
         ground_truth = [
             entity_list_to_iob_format(contexts[i], ground_truth[i])
             for i in range(len(ground_truth))
@@ -448,7 +459,7 @@ def evaluate_ned(
         )
 
     elif eval_method == "list":
-        eval_path = results_dir + "/ner_list_evaluation.json"
+        eval_path = results_csv_path.replace(".csv", "_ner_list_evaluation.json")
         metrics = ner_list_eval(predictions, ground_truth)
         log.info(metrics)
         json.dump(metrics, open(eval_path, "w"), indent=4, ensure_ascii=False)
@@ -487,7 +498,7 @@ def main(cfg: DictConfig):
 
     log.info("Evaluating the predictions.")
     evaluate_ned(
-        output_dir, cfg.evaluation.method, cfg.evaluation.resolve_overlapping_entities
+        output_file, cfg.evaluation.method, cfg.evaluation.resolve_overlapping_entities
     )
 
 

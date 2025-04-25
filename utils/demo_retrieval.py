@@ -3,12 +3,13 @@
 import random
 from typing import Any, Optional
 
-import CONSTANTS as CONSTANTS
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.cluster import KMeans
 from transformers import BertModel, BertTokenizer
+
+import CONSTANTS as CONSTANTS
 
 # TODO(smamooler): Add the functions from demo_retrieval_utils.py to this file, and clean them.
 tokenizer = BertTokenizer.from_pretrained("pritamdeka/S-PubMedBert-MS-MARCO")
