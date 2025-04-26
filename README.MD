@@ -1,11 +1,24 @@
-# TODOS:
+# My Project Title
 
-- [ ] add support for ablation studies: different models, different merging strategies, w/ and w/o self-verification
-- [ ] write notebook for generating PICLe vs baselines plots
-- [ ] resolve all the todos in the code
-- [ ] add links to paper, and video
+[![Paper](https://img.shields.io/badge/Paper-arXiv%20Preprint-b31b1b)](https://arxiv.org/abs/2412.11923)
+[![Video](https://img.shields.io/badge/Video-Presentation-red)](https://www.youtube.com/watch?v=Ma6wkgvXWU0)
+[![Dataset](https://img.shields.io/badge/Dataset-HuggingFace-blue)](https://huggingface.co/datasets/smamooler/PICLe)
 
-## Setup (WIP)
+
+
+## TODO
+
+- [ ] **Ablation Studies**  
+  Add support for running ablations:
+  - Different models
+  - Different merging strategies
+  - With and without self-verification
+
+- [ ] **Code Cleanup**  
+  Resolve all existing `TODO` comments and ensure codebase consistency.
+
+
+## Setup
 ### Environment
 ```
 conda create -n picle python=3.9 
@@ -17,7 +30,8 @@ pip install -r requirements.txt
 export HF_API_KEY=<YOUR_HF_API_KEY>
 export OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
 ```
-## Data preparation (WIP)
+
+## Dataset preparation (WIP)
 Instructions coming soon.
 
 ## Experiments
@@ -41,6 +55,8 @@ Once the results are ready for all clusters, merge results from all clusters and
 
 **Note** that this script will consider the **latest** run of the inference script for each cluster.
 
+To plot the results use the [picle](picle.ipynb) notebook.
+
 ### Input-output correspondence of in-context demonstrations
 To run the experiments with random corrupted demonstrations for all datasets run the command below:
 
@@ -48,11 +64,6 @@ To run the experiments with random corrupted demonstrations for all datasets run
 
 To aggregate the results of these experiments and plot them use the [analysis_random_corrupted_demos](analysis_random_corrupted_demos.ipynb) notebook.
 
-**NOTE** - Reproducibility note: results for `random ood label from text` is not the same as the one in the paper. Investigating this further...
-Potential causes:
-- incorrect test data (non_null instead of full)
-- different random seed
-- different model
 
 ### Partially Correct ICL demonstrations
 To run the experiments with partially correct demonstrations for all datasets run the command below:
@@ -68,10 +79,14 @@ To aggregate the results of these experiments and plot them use the [analysis_pa
 ```python incontext_ned.py --config-name=ten_shot_ned data=<dataset_name>```
 
 
-# Acknowledgements (WIP)
-- vLLM library
-- HuggingFace
-- Datasets
+# Acknowledgements
+- [vLLM](https://github.com/vllm-project/vllm) library for providing an efficient and flexible serving and inference framework for large language models.
+- [HuggingFace](https://huggingface.co) for offering a comprehensive ecosystem of models, datasets, and tools that significantly facilitated model development and evaluation.
+- Datasets:
+  - [bigbio/blurb](https://huggingface.co/datasets/bigbio/blurb) for bc5chem, bc5diseas, and bc2gm datastets 
+  - [bigbio/chemprot](https://huggingface.co/datasets/bigbio/chemprot) for chemprot-chem and chemprot-gene datasets
+
+Special thanks to the maintainers and contributors of these open-source projects and datasets for making their work publicly available and well-documented.
 
 # Citation
 If you use PICLe in your research, please cite our paper:
