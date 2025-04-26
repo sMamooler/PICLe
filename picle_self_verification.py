@@ -11,11 +11,12 @@ import os
 import CONSTANTS as const
 import hydra
 import pandas as pd
-from hydra import compose, initialize
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+from incontext_ned import evaluate_ned
+from omegaconf import DictConfig
 from tqdm import tqdm
 from transformers import AutoTokenizer
+from utils.config import load_experiment_result_config
 from utils.evaluation import post_process_extractions
 from utils.llm import call_llm, unload_llm
 from utils.prompters import get_sv_prompt
@@ -34,9 +35,6 @@ def self_verification(
     Returns:
         str: The path to the csv file containing the self-verification results.
     """
-
-    for column in ["gt entities", "pred entities"]:
-        annotations[column] = annotations[column].apply(ast.literal_eval)
 
     gts = annotations["gt entities"].tolist()
     texts = annotations["text"].tolist()
@@ -155,13 +153,17 @@ def main(cfg: DictConfig):
     output_dir = HydraConfig.get().runtime.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
-    # Run self-verification on the annotations
     if cfg.get("annotation_file_path"):
         sv_annotation_file_path = cfg.get("annotation_file_path").replace(
             ".csv", "_sv.csv"
         )
         annotations = pd.read_csv(cfg.get("annotation_file_path"))
+        for column in ["gt entities", "pred entities"]:
+            annotations[column] = annotations[column].apply(ast.literal_eval)
     elif cfg.get("clusters"):
+        cluster_ids = cfg.get("clusters").split(",")
+        cluster_ids = [int(cluster_id) for cluster_id in cluster_ids]
+        print("Cluster IDs: ", cluster_ids)
         sv_annotation_file_path = os.path.join(output_dir, "sv_results.csv")
         # find the annotation file path for all clusters
         results_folder = "outputs"
@@ -171,22 +173,37 @@ def main(cfg: DictConfig):
             for time in sorted(
                 os.listdir(os.path.join(results_folder, day)), reverse=True
             ):
-                with initialize(
-                    config_path=os.path.join(results_folder, day, time, ".hydra")
-                ):
-                    exp_cfg = compose(config_name="config")
+                hydra_dict = load_experiment_result_config(
+                    os.path.join(results_folder, day, time, ".hydra"), "hydra"
+                )
+                # job_name = hydra_dict['hydra']['job']['name']
+                runtime_cfg_path = hydra_dict["hydra"]["runtime"]["config_sources"][1][
+                    "path"
+                ].split("/")[-1]
 
-                exp_cfg_dict = OmegaConf.to_container(exp_cfg, resolve=True)
-                dataset = exp_cfg_dict["data"]["dataset"]
-                cluster_id = exp_cfg_dict["cluster_id"]
-                if dataset == cfg.data.dataset and cluster_id in cfg.get("clusters"):
-                    annotation_file_path = os.path.join(
-                        results_folder, day, time, "outputs", "results.csv"
+                if runtime_cfg_path == "picle_inference":
+
+                    exp_cfg_dict = load_experiment_result_config(
+                        os.path.join(results_folder, day, time, ".hydra"), "config"
                     )
-                    cluster_id2annotation_file_path[cluster_id] = annotation_file_path
+                    dataset = exp_cfg_dict["data"]["dataset"]
+                    cluster_id = exp_cfg_dict["demonstration_retrieval"]["cluster_id"]
 
+                    if (
+                        dataset == cfg.data.dataset
+                        and cluster_id in cluster_ids
+                        and cluster_id not in cluster_id2annotation_file_path
+                    ):
+                        annotation_file_path = os.path.join(
+                            results_folder, day, time, "results.csv"
+                        )
+                        cluster_id2annotation_file_path[cluster_id] = (
+                            annotation_file_path
+                        )
+
+        print("cluster_id2annotation_file_path: ", cluster_id2annotation_file_path)
         data_complete = True
-        for cluster_id in cfg.get("clusters"):
+        for cluster_id in cluster_ids:
             if cluster_id not in cluster_id2annotation_file_path:
                 print(
                     f"Results for cluster {cluster_id} does not exist. Please run in-context NED for this cluster first."
@@ -196,9 +213,13 @@ def main(cfg: DictConfig):
             exit(1)
 
         # concatenate all the annotations
-        annotations = pd.EmptyDataFrame()
+        annotations = pd.DataFrame()
         for cluster_id, annotation_file_path in cluster_id2annotation_file_path.items():
             cluster_annotations = pd.read_csv(annotation_file_path)
+            for column in ["gt entities", "pred entities"]:
+                cluster_annotations[column] = cluster_annotations[column].apply(
+                    ast.literal_eval
+                )
             cluster_annotations["cluster_id"] = cluster_id
             annotations = pd.concat(
                 [annotations, cluster_annotations], ignore_index=True
@@ -206,18 +227,24 @@ def main(cfg: DictConfig):
 
         # group by text and merge the pred entities in a list
         annotations = (
-            annotations["text", "pred entities", "gt entities"]
-            .groupby("text")
+            annotations.groupby(["id", "text"])
             .agg(
                 {
-                    "pred entities": lambda x: list(set(x)),
-                    "gt entities": lambda x: list(set(x)),
+                    "pred entities": lambda x: list(set(sum(x, []))),
+                    "gt entities": lambda x: list(set(sum(x, []))),
                 }
             )
             .reset_index()
         )
 
+    print(annotations.head())
     self_verification(cfg, annotations, sv_annotation_file_path)
+
+    evaluate_ned(
+        sv_annotation_file_path,
+        cfg.evaluation.method,
+        cfg.evaluation.resolve_overlapping_entities,
+    )
 
 
 if __name__ == "__main__":

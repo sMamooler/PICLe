@@ -1,7 +1,5 @@
 # TODOS:
 
-- [ ] write script for demonstration retrieval
-- [ ] write script for self verification
 - [ ] add support for ablation studies: different models, different merging strategies, w/ and w/o self-verification
 - [ ] write notebook for generating PICLe vs baselines plots
 - [ ] resolve all the todos in the code
@@ -22,7 +20,7 @@ export OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
 ## Data preparation (WIP)
 Instructions coming soon.
 
-## Experiments (WIP)
+## Experiments
 
 ### PICLe: In-context NED with pseudo-annotated demonstrations
 #### Pseudo-annotation and self-verification
@@ -33,11 +31,15 @@ To pseudo-annotate a dataset and run self-verification, run the command below:
 This script will create a dataset in your data folder that contains the pseudo-annotations for the dataset you specified.
 
 #### Inferenaces and self-verification
-Then we run NED for each cluster id. The first time a demo dataset is used it is clustered (K=10 in the experiments in the paper)
-=> 1 script that we run K times
+To run inference with specialized-kmeans, run the command below for each cluster:
 
-Then we merge results from all clusters and run self verification over them
-=> 1 script to merge and self-verify.
+```python picle_inference.py data=<your_dataset_name> demonstration_retrieval.cluster_id=<cluster_id>```
+
+Once the results are ready for all clusters, merge results from all clusters and run self verification over them with the command below:
+
+```python picle_self_verification.py data=<your_dataset_name>```
+
+**Note** that this script will consider the **latest** run of the inference script for each cluster.
 
 ### Input-output correspondence of in-context demonstrations
 To run the experiments with random corrupted demonstrations for all datasets run the command below:

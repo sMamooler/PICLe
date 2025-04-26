@@ -1,0 +1,28 @@
+defaults:
+  - data: bc5chem
+
+model: mistral
+model_revision_hash: 73068f3702d050a2fd5aa2ca1e612e5036429398
+batch_size: 16
+seed: 12345
+verbose: True
+
+prompting:
+  method: Prompt-NER
+  use_entity_definition: true # whether to use the entity definition for the demo retrieval
+  num_entity_examples: 0 # number of examples of entities to include in the entity definition
+
+demonstration_retrieval:
+  method: specialized_kmeans
+  num_shots: 10
+  entity_embedding_type: null # indicates how the entities should be embedded
+  cluster_id: 0
+
+generation:
+  temperature: 0.0
+  top_p: 1.0
+  max_tokens: 512
+
+evaluation:
+  method: IOB
+  resolve_overlapping_entities: False

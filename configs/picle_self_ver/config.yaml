@@ -1,7 +1,7 @@
 defaults:
   - data: bc5chem
 
-annotation_file_path: /mnt/u14157_ic_nlp_001_files_nfs/nlpdata1/home/mamooler/PICLe/outputs/2025-04-24/16-22-52/results.csv
+clusters: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 model: mistral
 model_revision_hash: 73068f3702d050a2fd5aa2ca1e612e5036429398
 batch_size: 16
