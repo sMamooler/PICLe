@@ -20,8 +20,8 @@ import sys
 
 import CONSTANTS as const
 import hydra
+import joblib
 import pandas as pd
-import torch
 from hydra.core.hydra_config import HydraConfig
 from numpyencoder import NumpyEncoder
 from omegaconf import DictConfig
@@ -29,11 +29,12 @@ from seqeval.metrics import classification_report
 from seqeval.scheme import IOB2
 from tqdm import tqdm
 from transformers import AutoTokenizer
+from utils.config import validate_config
 from utils.demo_retrieval import (
     cluster_demos,
     compute_cosin_sim_matrix,
-    embed_samples,
     get_demos,
+    get_samples_embeddings,
 )
 from utils.evaluation import (
     entity_list_to_iob_format,
@@ -177,25 +178,21 @@ def run_incontext_ned(
         "knn",
         "specialized_kmeans",
     ]:
-        demo_embedding_file = f"{cfg.data.data_dir}/{cfg.data.dataset}/{cfg.data.demo_data_filename.replace('.json', '_embeddings.pt')}"
-        if os.path.exists(demo_embedding_file):
-            all_demo_embeddings = torch.load(demo_embedding_file)
-        else:
-            all_demo_embeddings = embed_samples(
-                demo_dataset,
-                entity_embedding_type=cfg.demonstration_retrieval.entity_embedding_type,
-            )
-            torch.save(all_demo_embeddings, demo_embedding_file)
+
+        all_demo_embeddings = get_samples_embeddings(
+            cfg,
+            demo_dataset,
+            entity_embedding_type=cfg.demonstration_retrieval.entity_embedding_type,
+            inference_mode=False,
+        )
         demo_embeddings = all_demo_embeddings[demo_dataset_indices]
 
-        inference_embedding_file = f"{cfg.data.data_dir}/{cfg.data.dataset}/{cfg.data.inference_data_filename.replace('.json', '_embeddings.pt')}"
-        if os.path.exists(inference_embedding_file):
-            inference_embeddings = torch.load(inference_embedding_file)
-        else:
-            inference_embeddings = embed_samples(
-                inference_dataset, entity_embedding_type=None
-            )
-            torch.save(inference_embeddings, inference_embedding_file)
+        inference_embeddings = get_samples_embeddings(
+            cfg,
+            inference_dataset,
+            entity_embedding_type=None,
+            inference_mode=True,
+        )
 
         demo_embeddings_dict = {
             "non-null": demo_embeddings[non_null_indices],
@@ -218,24 +215,51 @@ def run_incontext_ned(
         and "kmeans" in cfg.demonstration_retrieval.method
     ):
         cluster_file_name = f"{cfg.data.demo_data_filename[:-5]}_cluster.csv"
-        if cfg.data.demo_data_size:
+        if cfg.data.get("demo_data_size"):
             cluster_file_name = cluster_file_name.replace(
                 ".csv", f"_size{cfg.data.demo_data_size}_seed{cfg.seed}.csv"
             )
         if cfg.demonstration_retrieval.entity_embedding_type:
             cluster_file_name = cluster_file_name.replace(
                 ".csv",
-                f"{cfg.demonstration_retrieval.entity_embedding_type}-entity-embedding.csv",
+                f"_{cfg.demonstration_retrieval.entity_embedding_type}-entity-embedding.csv",
             )
-        kmeans_dict, clusters_df = cluster_demos(
-            demo_dataset,
-            demo_dict,
-            demo_embeddings_dict,
-            cfg.demonstration_retrieval.num_shots,
-        )
-        clusters_df.to_csv(
-            f"{cfg.data.data_dir}/{cfg.data.dataset}/{cluster_file_name}", index=False
-        )
+        kmeans_dict = {}
+        for key, embedding in demo_embeddings_dict.items():
+            key_cluster_file_name = cluster_file_name.replace(
+                "cluster.csv", f"{key}_cluster.csv"
+            )
+            key_kmeans_file_name = key_cluster_file_name.replace(".csv", "_kmeans.pkl")
+            if os.path.exists(
+                os.path.join(cfg.data.data_dir, cfg.data.dataset, key_kmeans_file_name)
+            ):
+                kmeans = joblib.load(
+                    os.path.join(
+                        cfg.data.data_dir, cfg.data.dataset, key_kmeans_file_name
+                    )
+                )
+                log.info(
+                    f"Kmeans already exists. Loaded from {os.path.join(cfg.data.data_dir, cfg.data.dataset, key_kmeans_file_name)}"
+                )
+            else:
+                kmeans, cluster_df = cluster_demos(
+                    demo_dict[key],
+                    embedding,
+                    cfg.demonstration_retrieval.num_shots,
+                )
+                joblib.dump(
+                    kmeans,
+                    os.path.join(
+                        cfg.data.data_dir, cfg.data.dataset, key_kmeans_file_name
+                    ),
+                )
+                cluster_df.to_csv(
+                    os.path.join(
+                        cfg.data.data_dir, cfg.data.dataset, key_cluster_file_name
+                    ),
+                    index=False,
+                )
+            kmeans_dict[key] = kmeans
 
     if (
         cfg.demonstration_retrieval.method
@@ -469,6 +493,8 @@ def evaluate_ned(
 
 @hydra.main(config_path="configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
+    validate_config(cfg)
+
     logging.basicConfig(level=logging.INFO if cfg.verbose else logging.WARNING)
 
     output_dir = HydraConfig.get().runtime.output_dir
