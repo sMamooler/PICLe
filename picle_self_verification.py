@@ -176,7 +176,6 @@ def main(cfg: DictConfig):
                 hydra_dict = load_experiment_result_config(
                     os.path.join(results_folder, day, time, ".hydra"), "hydra"
                 )
-                # job_name = hydra_dict['hydra']['job']['name']
                 runtime_cfg_path = hydra_dict["hydra"]["runtime"]["config_sources"][1][
                     "path"
                 ].split("/")[-1]
