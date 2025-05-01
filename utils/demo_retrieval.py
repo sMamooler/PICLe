@@ -259,12 +259,10 @@ def _get_knn_demos(
     cosine_sim_scores = cosine_sim_matrix[index + sample_index]
     args_sorted_cosine_sim = np.argsort(-cosine_sim_scores)
 
-    demos = []
-    index = 0
-    while len(demos) < num_shots:
-        index = args_sorted_cosine_sim[index]
-        demos.append(demo_pool[index])
-        index += 1
+    cosine_sim_scores = cosine_sim_matrix[index + sample_index]
+    args_sorted_cosine_sim = np.argsort(-cosine_sim_scores)
+    knn_indices = args_sorted_cosine_sim[:num_shots]
+    demos = [demo_pool[index] for index in knn_indices]
 
     return demos
 
